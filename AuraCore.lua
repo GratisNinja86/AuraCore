@@ -109,6 +109,7 @@ local charDefaults = {
     trackerX = 0,
     trackerY = -150,
     trackerIconSize = 40,
+    trackerTimerScale = 1.0,
     trackerSpacing = 4,
     trackerColumns = 8,
     trackerShowInactive = true,

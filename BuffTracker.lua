@@ -42,6 +42,9 @@ local function Settings()
     if s.trackerX == nil then s.trackerX = 0 end
     if s.trackerY == nil then s.trackerY = -150 end
     if s.trackerIconSize == nil then s.trackerIconSize = 40 end
+    if s.trackerTimerScale == nil then s.trackerTimerScale = 1.0 end
+    if s.trackerTimerScale < 0.5 then s.trackerTimerScale = 0.5 end
+    if s.trackerTimerScale > 2.0 then s.trackerTimerScale = 2.0 end
     if s.trackerSpacing == nil then s.trackerSpacing = 6 end
     if s.trackerColumns == nil then s.trackerColumns = 6 end
     if s.trackerSlotCount == nil then s.trackerSlotCount = math.max(5, table.getn(s.trackedBuffs)) end
@@ -504,6 +507,16 @@ local function UpdateTrackerTimerFont(b, remaining)
     local fontSize = math.floor(baseSize * (iconSize / 40) + 0.5)
     if fontSize < 8 then fontSize = 8 end
     if fontSize > 22 then fontSize = 22 end
+
+    -- Apply the user-configurable timer text scale after the normal
+    -- duration/icon-size calculation.
+    local s = Settings()
+    local timerScale = s and s.trackerTimerScale or 1.0
+    fontSize = math.floor(fontSize * timerScale + 0.5)
+
+    -- Keep the resulting font size within sensible bounds.
+    if fontSize < 4 then fontSize = 4 end
+    if fontSize > 44 then fontSize = 44 end
 
     if b.acTimerFontSize ~= fontSize then
         b.durationText:SetFont(b.timerFont, fontSize, b.timerFlags)
@@ -1025,19 +1038,42 @@ function Tracker.SetUnlocked(value)
 end
 function Tracker.IsUnlocked() return unlocked end
 
-local function MakeSlider(page, name, label, x, y, width, minVal, maxVal, step, getValue, setValue)
+local function MakeSlider(page, name, label, x, y, width, minVal, maxVal, step, getValue, setValue, precision)
     local slider = CreateFrame("Slider", name, page, "OptionsSliderTemplate")
     slider:SetWidth(width); slider:SetHeight(16)
     slider:SetPoint("TOPLEFT", page, "TOPLEFT", x, y)
-    slider:SetMinMaxValues(minVal, maxVal); slider:SetValueStep(step); slider:SetValue(getValue())
-    getglobal(name .. "Low"):SetText(tostring(minVal)); getglobal(name .. "High"):SetText(tostring(maxVal))
-    getglobal(name .. "Text"):SetText(label .. ": " .. getValue())
+    slider:SetMinMaxValues(minVal, maxVal)
+    slider:SetValueStep(step)
+    slider:SetValue(getValue())
+
+    local function FormatValue(value)
+        if precision then
+            return string.format("%.1f", value)
+        end
+        return tostring(value)
+    end
+
+    getglobal(name .. "Low"):SetText(FormatValue(minVal))
+    getglobal(name .. "High"):SetText(FormatValue(maxVal))
+    getglobal(name .. "Text"):SetText(label .. ": " .. FormatValue(getValue()))
+
     slider:SetScript("OnValueChanged", function()
-        local value = math.floor(this:GetValue() + 0.5)
-        setValue(value); getglobal(this:GetName() .. "Text"):SetText(label .. ": " .. value); LayoutAndUpdate()
+        local value = this:GetValue()
+
+        if precision then
+            value = math.floor(value * precision + 0.5) / precision
+        else
+            value = math.floor(value + 0.5)
+        end
+
+        setValue(value)
+        getglobal(this:GetName() .. "Text"):SetText(label .. ": " .. FormatValue(value))
+        LayoutAndUpdate()
     end)
+
     return slider
 end
+
 
 function Tracker.BuildOptions(page)
     if not page or page.trackerBuilt then return end
@@ -1081,21 +1117,25 @@ function Tracker.BuildOptions(page)
         function() return s.trackerSpacing end, function(v) s.trackerSpacing = v end)
     MakeSlider(page, "DCPTrackerColumnsSlider", "Columns", 215, -184, 145, 1, 10, 1,
         function() return s.trackerColumns end, function(v) s.trackerColumns = v end)
+    MakeSlider(page, "DCPTrackerTimerScaleSlider", "Timer Text Scale", 28, -250, 145, 0.5, 2.0, 0.1,
+        function() return s.trackerTimerScale end, function(v) s.trackerTimerScale = v end,  10)
 
     local red = CreateFrame("CheckButton", "DCPTrackerRedCheck", page, "UICheckButtonTemplate")
-    red:SetWidth(24); red:SetHeight(24); red:SetPoint("TOPLEFT", page, "TOPLEFT", 16, -238)
+    red:SetWidth(24); red:SetHeight(24); red:SetPoint("TOPLEFT", page, "TOPLEFT", 16, -306)
     red:SetChecked(s.trackerRedExpiring and 1 or nil)
     red:SetScript("OnClick", function() Settings().trackerRedExpiring = this:GetChecked() and true or false; LayoutAndUpdate() end)
     local redText = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     redText:SetPoint("LEFT", red, "RIGHT", 3, 0); redText:SetText("Red during the final 5 seconds")
 
     local test = CreateFrame("Button", "DCPTrackerTestButton", page, "UIPanelButtonTemplate")
-    test:SetWidth(160); test:SetHeight(24); test:SetPoint("TOPLEFT", page, "TOPLEFT", 14, -322)
+    test:SetWidth(160); test:SetHeight(24);
+    test:SetPoint("TOPLEFT", page, "TOPLEFT", 14, -354)
     test:SetText("Test Buff Tracker")
     test:SetScript("OnClick", function() local active=Tracker.ToggleTest(); this:SetText(active and "Stop Test" or "Test Buff Tracker") end)
 
     local lock = CreateFrame("Button", "DCPTrackerLockButton", page, "UIPanelButtonTemplate")
-    lock:SetWidth(160); lock:SetHeight(24); lock:SetPoint("LEFT", test, "RIGHT", 12, 0)
+    lock:SetWidth(160); lock:SetHeight(24);
+    lock:SetPoint("LEFT", test, "RIGHT", 12, 0)
     lock:SetText("Unlock Tracker")
     lock:SetScript("OnClick", function()
         local current = Settings()
@@ -1113,7 +1153,7 @@ function Tracker.BuildOptions(page)
     end)
 
     local note = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", page, "TOPLEFT", 14, -364); note:SetWidth(350); note:SetJustifyH("LEFT")
+    note:SetPoint("TOPLEFT", page, "TOPLEFT", 14, -396); note:SetWidth(350); note:SetJustifyH("LEFT")
     note:SetText("Unlock the tracker to configure its slots. In live mode, only active buffs, talent procs, and trinket proc buffs are shown; inactive and empty slots are always hidden.")
 end
 
